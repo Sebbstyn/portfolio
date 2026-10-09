@@ -122,13 +122,16 @@ h1, h2, h3, p { margin: 0; }
 }
 .logo:hover { transform: rotate(-1deg) scale(1.03); }
 .logo img { height: clamp(64px, 11vw, 116px); width: auto; }
-.wm { height: clamp(54px, 9vw, 108px); width: auto; overflow: visible; }
+/* capped so the logo and both banner chips fit on one row at desktop width */
+.wm { height: clamp(54px, 9vw, 88px); width: auto; overflow: visible; }
 .wm text { font: 900 64px var(--f-display); letter-spacing: -1.5px; }
 .wm-shadow, .wm-stroke { fill: var(--brand-ink); stroke: var(--brand-ink); stroke-width: 17px; stroke-linejoin: round; }
 .wm-shadow { transform: translate(0, 7px); }
 .wm-fill { fill: #fff; }
 
+.banner-side { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 30px; }
 .hello { display: flex; align-items: center; gap: 16px; }
+.hello.stat b { font-size: clamp(19px, 2.5vw, 25px); font-variant-numeric: tabular-nums; }
 .hello-ic {
   width: 50px; height: 50px; flex: none;
   display: grid; place-items: center;
@@ -192,8 +195,6 @@ h1, h2, h3, p { margin: 0; }
    --------------------------------------------------------------------- */
 main { min-height: 46vh; padding: 6px 0 20px; }
 main:focus { outline: none; }
-.view { animation: view-in .35s var(--ease) both; }
-@keyframes view-in { from { opacity: 0; transform: translateY(12px); } }
 
 /* the big colour cards (home bento + section headers) */
 .bento { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px; }
@@ -222,7 +223,8 @@ main:focus { outline: none; }
 .c-home.bc::after, .c-contact.bc::after, .c-thumbnails.bc::after { filter: invert(1); opacity: .07; }
 a.bc, button.bc { cursor: var(--cur-pointer); }
 a.bc:hover, button.bc:hover {
-  transform: translateY(-4px) scale(1.012);
+  /* --rx and --ry come from the pointer position (see app.js) */
+  transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) translateY(-4px) scale(1.012);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .4), 0 20px 40px -20px var(--c);
 }
 .bc.wide { grid-column: span 6; }
@@ -808,8 +810,135 @@ a.vt-video:hover .vt-title { text-decoration: underline; }
 .demo-flag a { padding: 5px 11px; border-radius: 999px; background: #111; color: #fff; text-decoration: none; }
 
 /* ---------------------------------------------------------------------
+   Motion
+   Everything here is switched off for visitors who ask for reduced motion
+   (the rule at the very end of this file).
+   --------------------------------------------------------------------- */
+:root { --back: cubic-bezier(.34, 1.56, .64, 1); }
+
+@keyframes rise { from { opacity: 0; transform: translateY(22px) scale(.96); } }
+@keyframes pop { 0% { transform: scale(.7); } 60% { transform: scale(1.15); } }
+@keyframes pop-in { from { opacity: 0; transform: scale(.3); } }
+@keyframes wiggle { 25% { transform: rotate(-12deg) scale(1.12); } 60% { transform: rotate(9deg) scale(1.12); } }
+
+/* things wait unseen, then rise as they scroll into view (reveal() in app.js) */
+.rv-wait { opacity: 0; }
+.rise { animation: rise .55s var(--back) backwards; animation-delay: calc(var(--i, 0) * 60ms); }
+
+/* faint pixels drifting up behind the page */
+.bg-px { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+.bg-px i { position: absolute; bottom: -60px; background: #fff; opacity: .035; animation: drift var(--t, 24s) linear var(--d, 0s) infinite; }
+@keyframes drift { to { transform: translateY(calc(-100vh - 120px)) rotate(90deg); } }
+
+/* banner: twinkling pixels, the logo dropping in then floating */
+.banner-fx rect { animation: px-twinkle var(--t, 6s) ease-in-out var(--d, 0s) infinite; }
+@keyframes px-twinkle { 50% { opacity: .12; } }
+.logo { animation: logo-in .9s var(--back) backwards; }
+@keyframes logo-in { from { opacity: 0; transform: rotate(-14deg) scale(.5) translateY(-40px); } }
+.wm, .logo img { animation: logo-float 5.5s ease-in-out infinite; }
+@keyframes logo-float { 50% { translate: 0 -5px; rotate: 1.2deg; } }
+.hello { animation: slide-in .7s var(--back) .4s backwards; }
+.hello.stat { animation-delay: .25s; }
+.hello.stat .hello-ic .ic { animation: none; }
+@keyframes slide-in { from { opacity: 0; transform: translateX(40px); } }
+.hello-ic .ic { animation: spark 3.6s ease-in-out infinite; }
+@keyframes spark { 50% { transform: rotate(90deg) scale(1.22); } }
+
+/* tabs: arrive one after another; icons react to hover and to being chosen */
+.tabcard { animation: rise .5s var(--back) backwards; animation-delay: calc(var(--i, 0) * 70ms + 200ms); }
+.tabcard:hover .tab-ic .ic, .social:hover .social-ic .ic, .about-cta:hover .ic { animation: wiggle .45s var(--ease); }
+.tabcard[aria-current="page"] .tab-ic, .seg-b[aria-selected="true"] { animation: pop .38s var(--back); }
+.mod:not(.is-empty):hover .mod-icon { animation: wiggle .5s var(--ease); }
+
+/* colour cards: a soft light under the pointer, and panels that bob */
+a.bc::before {
+  content: "";
+  position: absolute; inset: 0; z-index: 3; pointer-events: none;
+  background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 50%), rgba(255, 255, 255, .26), transparent 65%);
+  opacity: 0; transition: opacity .3s var(--ease);
+}
+a.bc:hover::before { opacity: 1; }
+.bc-peek { animation: bob 5s ease-in-out infinite; }
+.bc-peek2 { animation: bob 5s ease-in-out -2.4s infinite; }
+.bento > .bc:nth-child(2) .bc-peek { animation-delay: -1.6s; }
+.bento > .bc:nth-child(3) .bc-peek { animation-delay: -3.2s; }
+.bento > .bc:nth-child(5) .bc-peek { animation-delay: -2s; }
+@keyframes bob { 50% { translate: 0 6px; } }
+
+/* the moving parts inside the card illustrations */
+.bc-peek svg * { transform-box: fill-box; }
+.an-pulse { transform-origin: center; animation: il-pulse 1.8s ease-in-out infinite; }
+@keyframes il-pulse { 50% { transform: scale(1.14); } }
+.an-fill { transform-origin: left center; animation: il-fill 4.5s linear infinite; }
+@keyframes il-fill { from { transform: scaleX(.04); } }
+.an-grow { transform-origin: center bottom; animation: il-grow 3.2s var(--ease) infinite; animation-delay: calc(var(--i) * 120ms); }
+@keyframes il-grow { 50% { transform: scaleY(.6); } }
+.an-turn { transform-origin: center; animation: il-turn 4s var(--ease) infinite; animation-delay: calc(var(--i) * 1s); }
+@keyframes il-turn { 12% { transform: scale(1.07); } 30% { transform: scale(1); } }
+.an-chat { transform-origin: left bottom; animation: il-chat 5s var(--back) backwards infinite; animation-delay: calc(var(--i) * .6s); }
+@keyframes il-chat { 0% { transform: scale(0); opacity: 0; } 8%, 82% { transform: scale(1); opacity: 1; } 92%, 100% { transform: scale(1); opacity: 0; } }
+.an-hop { animation: il-hop 6.4s steps(1, end) infinite; }
+@keyframes il-hop {
+  0% { transform: translate(0, 0); } 12.5% { transform: translate(54px, 0); } 25% { transform: translate(108px, 0); }
+  37.5% { transform: translate(108px, 54px); } 50% { transform: translate(162px, 54px); } 62.5% { transform: translate(54px, 54px); }
+  75% { transform: translate(0, 54px); } 87.5% { transform: translate(162px, 0); }
+}
+
+/* presses, and the viewer opening */
+.btn:active, .seg-b:active, .about-cta:active, .sound-btn:active, .mv-x:active { transform: scale(.94); }
+.cc:not(.is-empty):active .cc-media { transform: scale(.985); }
+.mv-frame, .mv-img, .mv-px { animation: zoom-in .3s var(--back) backwards; }
+@keyframes zoom-in { from { opacity: 0; transform: scale(.92); } }
+
+/* texture chest: items pop in, and jump when pointed at */
+button.slot .slot-item {
+  transition: transform .2s var(--back);
+  animation: pop-in .4s var(--back) backwards; animation-delay: calc(var(--i, 0) * 16ms + 150ms);
+}
+button.slot:hover .slot-item, button.slot:focus-visible .slot-item { transform: scale(1.22) translateY(-2px); }
+
+/* "coming soon": rolling scanlines and a breathing label */
+.nosignal::after {
+  content: "";
+  position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(rgba(0, 0, 0, .2) 0 2px, transparent 2px 6px);
+  animation: scan .5s linear infinite;
+}
+@keyframes scan { to { background-position: 0 6px; } }
+.soon span { animation: soon-pulse 2.4s ease-in-out infinite; }
+@keyframes soon-pulse { 50% { transform: scale(1.05); } }
+
+/* the pixels that fly out of a click */
+.bit {
+  position: fixed; z-index: 95;
+  width: var(--s); height: var(--s); margin: calc(var(--s) / -2) 0 0 calc(var(--s) / -2);
+  pointer-events: none;
+  animation: bit .55s cubic-bezier(.2, .7, .3, 1) forwards;
+}
+@keyframes bit { to { transform: translate(var(--dx), var(--dy)) rotate(90deg) scale(.2); opacity: 0; } }
+
+/* sound on/off */
+.sound-btn {
+  position: fixed; right: 16px; bottom: 16px; z-index: 60;
+  width: 46px; height: 46px;
+  display: grid; place-items: center;
+  border-radius: var(--r);
+  border: 1px solid color-mix(in srgb, var(--brand) 45%, transparent);
+  background: color-mix(in srgb, var(--brand) 16%, var(--card));
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .4);
+  transition: transform .2s var(--back), color .2s var(--ease);
+}
+.sound-btn:hover { transform: translateY(-3px) scale(1.06); }
+.sound-btn[aria-pressed="false"] { color: var(--tx-3); }
+
+/* ---------------------------------------------------------------------
    Responsive
    --------------------------------------------------------------------- */
+/* mid widths: the two banner chips stack so they still fit beside the logo */
+@media (min-width: 900px) and (max-width: 1199px) {
+  .banner-side { flex-direction: column; align-items: flex-start; }
+}
+
 @media (max-width: 1040px) {
   /* keep the peek panel clear of the two-line title on narrower cards */
   .bento > .bc:not(.wide) { min-height: 214px; }

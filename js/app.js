@@ -14,6 +14,11 @@
   const pad = n => String(n).padStart(2, '0');
   const frag = () => document.createDocumentFragment();
 
+  // sounds live in sfx.js; the site still works if that file is missing
+  const sfx = (name, arg) => { if (window.SFX) window.SFX.play(name, arg); };
+  // visitors who ask their system for less motion get no tilt, bursts or reveals
+  const REDUCED = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
   function fill(el, props, kids) {
     if (props) {
       for (const k in props) {
@@ -67,6 +72,9 @@
     tiktok: '<path d="M14 4v10.4a3.6 3.6 0 1 1-3.2-3.6" stroke-width="2.6"/><path d="M14 4.2c.5 2.4 2.1 3.9 4.6 4.2" stroke-width="2.6"/>',
     instagram: '<rect x="4" y="4" width="16" height="16" rx="5"/><circle cx="12" cy="12" r="3.6"/><circle cx="16.9" cy="7.1" r="1" fill="currentColor" stroke="none"/>',
     github: '<path d="m9 8-4 4 4 4M15 8l4 4-4 4"/>',
+    eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3" fill="currentColor"/>',
+    sound: '<path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z" fill="currentColor"/><path d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.6 7.6 0 0 1 0 11"/>',
+    mute: '<path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z" fill="currentColor"/><path d="m16 9.5 5 5M21 9.5l-5 5"/>',
   };
   function icon(name) {
     const svg = s('svg', { class: 'ic', viewBox: '0 0 24 24', 'aria-hidden': 'true' });
@@ -195,7 +203,11 @@
       for (let x = 0; x < W; x += cell) {
         const edge = Math.abs(x / W - 0.5) * 2;
         if (r() < 0.025 + edge * edge * 0.2 + (y / H) * 0.05) {
-          svg.append(s('rect', { x, y, width: cell, height: cell, class: r() < 0.5 ? 'px-d' : 'px-l' }));
+          // each pixel twinkles on its own clock
+          svg.append(s('rect', {
+            x, y, width: cell, height: cell, class: r() < 0.5 ? 'px-d' : 'px-l',
+            style: { '--t': (3.5 + r() * 5).toFixed(2) + 's', '--d': (-r() * 8).toFixed(2) + 's' },
+          }));
         }
       }
     }
@@ -236,16 +248,48 @@
     $('#hello-big').textContent = b.big || 'Creative portfolio';
     $('#hello-ic').append(icon('spark'));
 
+    // the "Views generated" number sits to the left of that
+    const views = num(C.viewsGenerated);
+    if (views > 0) {
+      $('#banner-side').prepend(h('div', { class: 'hello stat', role: 'img', 'aria-label': fmtFull(views) + ' views generated' },
+        h('span', { class: 'hello-ic', 'aria-hidden': 'true' }, icon('eye')),
+        h('span', { class: 'hello-t', 'aria-hidden': 'true' }, h('small', { text: 'Views generated' }), countUp(views, 1800))));
+    }
+
     $('#banner-fx').append(scatter(11));
     const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#151517';
     $('#banner-edge').style.backgroundImage = edgeTile(bg);
     document.documentElement.style.setProperty('--px-tile', pxTile());
 
-    tabsEl.append(...SECTIONS.map(sec => h('a', { class: 'tabcard c-' + sec.id, href: '#' + sec.id },
+    tabsEl.append(...SECTIONS.map((sec, i) => h('a', { class: 'tabcard c-' + sec.id, href: '#' + sec.id, style: { '--i': i } },
       h('span', { class: 'tab-ic' }, icon(sec.icon)),
       h('span', { class: 'tab-tx' },
         h('span', { class: 'tab-t', text: sec.label }),
         h('span', { class: 'tab-s', text: sec.hint })))));
+
+    // faint pixels drifting up behind the whole page
+    const r = rng(23);
+    document.body.prepend(h('div', { class: 'bg-px', 'aria-hidden': 'true' }, Array.from({ length: 16 }, () => {
+      const size = 10 + Math.round(r() * 3) * 8;
+      return h('i', { style: {
+        left: (r() * 100).toFixed(1) + '%', width: size + 'px', height: size + 'px',
+        '--t': (16 + r() * 22).toFixed(1) + 's', '--d': (-r() * 38).toFixed(1) + 's',
+      } });
+    })));
+
+    // the sound on/off button
+    if (window.SFX) {
+      const btn = h('button', { class: 'sound-btn', type: 'button' });
+      const paint = () => {
+        btn.replaceChildren(icon(window.SFX.muted ? 'mute' : 'sound'));
+        btn.setAttribute('aria-label', window.SFX.muted ? 'Turn sound on' : 'Turn sound off');
+        btn.setAttribute('aria-pressed', !window.SFX.muted);
+        btn.title = window.SFX.muted ? 'Sound is off' : 'Sound is on';
+      };
+      btn.addEventListener('click', () => { window.SFX.toggle(); paint(); });
+      paint();
+      document.body.append(btn);
+    }
 
     if (DEMO) {
       document.body.append(h('div', { class: 'demo-flag' }, 'Demo preview · sample content',
@@ -288,6 +332,7 @@
 
     if (secChanged) mount();
     else if (subChanged) fillBody();
+    if (!first) sfx(secChanged ? 'tab' : subChanged ? 'sub' : '');
 
     [...tabsEl.children].forEach((el, k) => {
       if (k === i) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current');
@@ -317,6 +362,7 @@
     }
     tipHide();
     main.replaceChildren(view);
+    reveal(view);
     if (bodyEl) fillBody();
   }
 
@@ -332,6 +378,32 @@
     tipHide();
     bodyEl.className = 'vbody ' + (sub || '');
     bodyEl.replaceChildren(RENDER[sec.id](sub));
+    reveal(bodyEl);
+  }
+
+  /* ------------------------------------------------------------------
+     Motion: things rise into place as they scroll into view
+     ------------------------------------------------------------------ */
+  const REVEAL = '.about, .bento > .bc, .strip, .seg, .grid > *, .tiles > *, .panel, .channel, .inv, .nosignal, .note, .foot-h, .socials > *, .biz';
+  const watcher = !REDUCED && 'IntersectionObserver' in window
+    ? new IntersectionObserver(entries => {
+      // everything that comes into view together rises one after the other
+      entries.filter(e => e.isIntersecting).forEach((e, i) => {
+        watcher.unobserve(e.target);
+        e.target.style.setProperty('--i', Math.min(i, 9));
+        e.target.classList.remove('rv-wait');
+        e.target.classList.add('rise');
+      });
+    })
+    : null;
+
+  function reveal(root) {
+    if (!watcher) return;
+    for (const el of root.querySelectorAll(REVEAL)) {
+      if (el.classList.contains('rise') || el.classList.contains('rv-wait')) continue;
+      el.classList.add('rv-wait');
+      watcher.observe(el);
+    }
   }
 
   /* ------------------------------------------------------------------
@@ -389,32 +461,34 @@
   /* ------------------------------------------------------------------
      Card illustrations (the white panel peeking out of each colour card)
      ------------------------------------------------------------------ */
+  // The "an-" classes are the moving parts: see the illustration keyframes in
+  // styles.css. --i staggers elements that take turns.
   const ILLO = {
     edits:
       '<rect class="il-k" x="16" y="16" width="268" height="124" rx="8"/>' +
-      '<circle class="il-a" cx="150" cy="72" r="24"/><path class="il-w" d="M143 60v24l20-12z"/>' +
+      '<g class="an-pulse"><circle class="il-a" cx="150" cy="72" r="24"/><path class="il-w" d="M143 60v24l20-12z"/></g>' +
       '<rect x="30" y="122" width="240" height="5" rx="2.5" fill="#fff" opacity=".25"/>' +
-      '<rect class="il-a" x="30" y="122" width="98" height="5" rx="2.5"/>' +
+      '<rect class="il-a an-fill" x="30" y="122" width="240" height="5" rx="2.5"/>' +
       '<rect class="il-g" x="16" y="154" width="160" height="12" rx="6"/><rect class="il-d" x="16" y="174" width="100" height="9" rx="4.5"/>',
     thumbnails:
-      '<rect class="il-a" x="16" y="16" width="128" height="72" rx="7"/>' +
-      '<circle class="il-w" cx="48" cy="52" r="17" opacity=".9"/><rect class="il-w" x="76" y="38" width="54" height="10" rx="3"/><rect class="il-w" x="76" y="56" width="38" height="10" rx="3" opacity=".7"/>' +
-      '<rect class="il-k" x="156" y="16" width="128" height="72" rx="7"/><rect class="il-a" x="170" y="60" width="70" height="12" rx="3"/><rect class="il-w" x="170" y="34" width="46" height="12" rx="3" opacity=".85"/>' +
-      '<rect class="il-g" x="16" y="100" width="128" height="72" rx="7"/><rect class="il-d" x="30" y="118" width="60" height="12" rx="3"/><circle class="il-d" cx="116" cy="136" r="16"/>' +
-      '<rect class="il-d" x="156" y="100" width="128" height="72" rx="7"/><rect class="il-w" x="170" y="140" width="80" height="12" rx="3"/>',
+      '<g class="an-turn" style="--i:0"><rect class="il-a" x="16" y="16" width="128" height="72" rx="7"/>' +
+      '<circle class="il-w" cx="48" cy="52" r="17" opacity=".9"/><rect class="il-w" x="76" y="38" width="54" height="10" rx="3"/><rect class="il-w" x="76" y="56" width="38" height="10" rx="3" opacity=".7"/></g>' +
+      '<g class="an-turn" style="--i:1"><rect class="il-k" x="156" y="16" width="128" height="72" rx="7"/><rect class="il-a" x="170" y="60" width="70" height="12" rx="3"/><rect class="il-w" x="170" y="34" width="46" height="12" rx="3" opacity=".85"/></g>' +
+      '<g class="an-turn" style="--i:3"><rect class="il-g" x="16" y="100" width="128" height="72" rx="7"/><rect class="il-d" x="30" y="118" width="60" height="12" rx="3"/><circle class="il-d" cx="116" cy="136" r="16"/></g>' +
+      '<g class="an-turn" style="--i:2"><rect class="il-d" x="156" y="100" width="128" height="72" rx="7"/><rect class="il-w" x="170" y="140" width="80" height="12" rx="3"/></g>',
     analytics:
       '<rect class="il-g" x="16" y="16" width="86" height="10" rx="5"/><rect class="il-k" x="16" y="34" width="58" height="18" rx="4"/>' +
-      '<rect class="il-g" x="24" y="124" width="24" height="34" rx="4"/><rect class="il-g" x="62" y="104" width="24" height="54" rx="4"/>' +
-      '<rect class="il-g" x="100" y="112" width="24" height="46" rx="4"/><rect class="il-g" x="138" y="86" width="24" height="72" rx="4"/>' +
-      '<rect class="il-g" x="176" y="96" width="24" height="62" rx="4"/><rect class="il-a" x="214" y="58" width="24" height="100" rx="4"/>' +
-      '<rect class="il-a" x="252" y="30" width="24" height="128" rx="4"/><rect class="il-d" x="16" y="158" width="268" height="2"/>',
+      '<rect class="il-g an-grow" style="--i:0" x="24" y="124" width="24" height="34" rx="4"/><rect class="il-g an-grow" style="--i:1" x="62" y="104" width="24" height="54" rx="4"/>' +
+      '<rect class="il-g an-grow" style="--i:2" x="100" y="112" width="24" height="46" rx="4"/><rect class="il-g an-grow" style="--i:3" x="138" y="86" width="24" height="72" rx="4"/>' +
+      '<rect class="il-g an-grow" style="--i:4" x="176" y="96" width="24" height="62" rx="4"/><rect class="il-a an-grow" style="--i:5" x="214" y="58" width="24" height="100" rx="4"/>' +
+      '<rect class="il-a an-grow" style="--i:6" x="252" y="30" width="24" height="128" rx="4"/><rect class="il-d" x="16" y="158" width="268" height="2"/>',
     contact:
-      '<rect class="il-g" x="16" y="18" width="176" height="42" rx="14"/><rect class="il-d" x="34" y="34" width="110" height="9" rx="4.5"/>' +
-      '<rect class="il-k" x="104" y="70" width="180" height="42" rx="14"/><rect class="il-w" x="122" y="86" width="126" height="9" rx="4.5" opacity=".85"/>' +
-      '<rect class="il-g" x="16" y="122" width="124" height="42" rx="14"/><rect class="il-d" x="34" y="138" width="70" height="9" rx="4.5"/>',
+      '<g class="an-chat" style="--i:0"><rect class="il-g" x="16" y="18" width="176" height="42" rx="14"/><rect class="il-d" x="34" y="34" width="110" height="9" rx="4.5"/></g>' +
+      '<g class="an-chat" style="--i:1"><rect class="il-k" x="104" y="70" width="180" height="42" rx="14"/><rect class="il-w" x="122" y="86" width="126" height="9" rx="4.5" opacity=".85"/></g>' +
+      '<g class="an-chat" style="--i:2"><rect class="il-g" x="16" y="122" width="124" height="42" rx="14"/><rect class="il-d" x="34" y="138" width="70" height="9" rx="4.5"/></g>',
   };
 
-  // a blank Minecraft inventory: just the empty slot grid
+  // a blank Minecraft inventory, with a highlight hopping from slot to slot
   function mcIllo() {
     const svg = s('svg', { viewBox: '0 0 300 200', preserveAspectRatio: 'xMinYMin slice' });
     svg.append(s('rect', { width: 300, height: 200, fill: '#c6c6c6' }));
@@ -426,6 +500,7 @@
         s('rect', { x: x + 3, y: y + 3, width: S - 3, height: S - 3, fill: '#fff' }),
         s('rect', { x: x + 3, y: y + 3, width: S - 6, height: S - 6, fill: '#8b8b8b' }));
     }
+    svg.append(s('rect', { class: 'an-hop', x: 17, y: 17, width: S - 6, height: S - 6, fill: '#fff', opacity: 0.5 }));
     return svg;
   }
 
@@ -696,7 +771,7 @@
           it.version && h('span', { class: 'mod-ver', text: 'v' + it.version }),
           it.sample && h('span', { class: 'tag', text: 'Sample' })),
         it.description && h('p', { class: 'mod-desc', text: it.description }),
-        downloads != null && h('p', { class: 'mod-stat' }, icon('download'), h('b', { text: fmtFull(downloads) }), ' downloads'),
+        downloads != null && h('p', { class: 'mod-stat' }, icon('download'), countUp(downloads), ' downloads'),
         tags.length > 0 && h('div', { class: 'tags' }, tags.map(t => h('span', { class: 'tag', text: t }))),
         linkEls.length > 0 && h('div', { class: 'mod-links' }, linkEls)));
   }
@@ -728,6 +803,21 @@
     return f;
   }
 
+  // a number that counts up to its value when it first appears
+  function countUp(value, ms) {
+    const el = h('b', { text: fmtFull(value) });
+    if (REDUCED) return el;
+    const start = performance.now();
+    ms = ms || 1100;
+    const step = now => {
+      const t = Math.min(1, (now - start) / ms);
+      el.textContent = fmtFull(value * (1 - Math.pow(1 - t, 3)));
+      if (t < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+    return el;
+  }
+
   function slotItem(it) {
     const n = Math.max(1, it.frames | 0);
     return h('span', {
@@ -744,10 +834,12 @@
       const it = items[i];
       if (!it) { grid.append(h('span', { class: 'slot' })); continue; }
       const b = h('button', {
-        class: 'slot', type: 'button', 'aria-label': it.name || 'Texture ' + (i + 1),
+        class: 'slot', type: 'button', 'aria-label': it.name || 'Texture ' + (i + 1), style: { '--i': i },
         onclick: () => openViewer(items, i, 'pixel'),
       }, slotItem(it));
       bindTip(b, () => [h('b', { text: it.name || 'Texture' }), it.note], 'mc');
+      // each slot plays its own note, so sweeping across the chest makes a tune
+      b.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') sfx('note', (i % 9) + Math.floor(i / 9)); });
       grid.append(b);
     }
     const wrap = h('div', { class: 'inv-wrap' },
@@ -1067,6 +1159,7 @@
       return h('button', {
         class: 'social', type: 'button', style, 'aria-label': 'Copy ' + p.label + ' username ' + value,
         onclick: () => copyText(value).then(() => {
+          sfx('success');
           sub.textContent = 'Copied';
           setTimeout(() => { sub.textContent = shown; }, 1600);
         }),
@@ -1093,6 +1186,7 @@
         : note('No contact links yet.', 'Add your email and socials in', 'js/content.js', 'under contact.'),
       email && h('p', { class: 'biz' }, 'Business inquiries:', h('br'), h('a', { href: 'mailto:' + email, text: email })),
       h('p', { class: 'copy', text: '© ' + new Date().getFullYear() + ' ' + (C.name || '') }));
+    reveal($('#contact'));
   }
 
   /* ------------------------------------------------------------------
@@ -1158,6 +1252,7 @@
     }
 
     function close() {
+      sfx('close');
       el.remove();
       document.documentElement.classList.remove('locked');
       viewer = null;
@@ -1174,11 +1269,13 @@
       else if (!e.shiftKey && document.activeElement === last) { first.focus(); e.preventDefault(); }
     });
 
-    viewer = { close, next: () => many && go(at + 1), prev: () => many && go(at - 1) };
+    const turn = n => { if (many) { sfx('next'); go(n); } };
+    viewer = { close, next: () => turn(at + 1), prev: () => turn(at - 1) };
     document.documentElement.classList.add('locked');
     tipHide();
     document.body.append(el);
     go(at);
+    sfx('open');
     closeBtn.focus();
   }
 
@@ -1219,6 +1316,65 @@
       tipShow(build(), r.left + r.width / 2, r.top + 8, cls);
     });
     el.addEventListener('blur', tipHide);
+  }
+
+  /* ------------------------------------------------------------------
+     Feel: hover and click sounds, tilting cards, a pixel burst on click
+     ------------------------------------------------------------------ */
+  const HOVERABLE = '.tabcard, a.bc, .cc:not(.is-empty), .seg-b, .social, .btn, .about-cta, .mv-nav, .mv-x, .sound-btn, .vt-video';
+
+  document.addEventListener('pointerover', e => {
+    if (e.pointerType !== 'mouse' || !e.target.closest) return;
+    const el = e.target.closest(HOVERABLE);
+    // only when the pointer arrives from outside, not when it moves within the element
+    if (el && !(e.relatedTarget && el.contains(e.relatedTarget))) sfx('hover');
+  });
+
+  document.addEventListener('pointerdown', e => {
+    if (e.button || !e.target.closest) return;
+    const el = e.target.closest('a, button');
+    // tabs make their own sound when the page changes
+    if (el && !el.disabled && !el.matches('.tabcard, .seg-b')) sfx('click');
+    burst(e.clientX, e.clientY, el);
+  });
+
+  // a few pixels flying out from wherever the visitor clicks
+  function burst(x, y, from) {
+    if (REDUCED) return;
+    const colour = from ? getComputedStyle(from).getPropertyValue('--c').trim() : '';
+    for (let i = 0; i < 7; i++) {
+      const angle = (i / 7) * Math.PI * 2 + Math.random() * 0.8, reach = 26 + Math.random() * 30;
+      const bit = h('i', { class: 'bit', style: {
+        left: x + 'px', top: y + 'px',
+        '--dx': (Math.cos(angle) * reach).toFixed(1) + 'px', '--dy': (Math.sin(angle) * reach).toFixed(1) + 'px',
+        '--s': (5 + Math.round(Math.random() * 5)) + 'px',
+        background: i % 3 === 0 ? '#fff' : colour || 'var(--brand)',
+      } });
+      bit.addEventListener('animationend', () => bit.remove());
+      document.body.append(bit);
+    }
+  }
+
+  // the big colour cards lean towards the pointer, with a soft light under it
+  if (!REDUCED) {
+    document.addEventListener('pointermove', e => {
+      if (e.pointerType !== 'mouse' || !e.target.closest) return;
+      const card = e.target.closest('a.bc');
+      if (!card) return;
+      const r = card.getBoundingClientRect();
+      const px = (e.clientX - r.left) / r.width, py = (e.clientY - r.top) / r.height;
+      card.style.setProperty('--ry', ((px - 0.5) * 7).toFixed(2) + 'deg');
+      card.style.setProperty('--rx', ((0.5 - py) * 7).toFixed(2) + 'deg');
+      card.style.setProperty('--mx', (px * 100).toFixed(1) + '%');
+      card.style.setProperty('--my', (py * 100).toFixed(1) + '%');
+    });
+    document.addEventListener('pointerout', e => {
+      const card = e.target.closest && e.target.closest('a.bc');
+      if (card && !(e.relatedTarget && card.contains(e.relatedTarget))) {
+        card.style.removeProperty('--rx');
+        card.style.removeProperty('--ry');
+      }
+    });
   }
 
   /* ------------------------------------------------------------------

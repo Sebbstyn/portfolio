@@ -23,6 +23,10 @@ window.PORTFOLIO = {
     big: "Creative portfolio",
   },
 
+  // The "Views generated" number in the banner. Type the new total here
+  // whenever it changes. Set it to 0 to hide the number.
+  viewsGenerated: 350028,
+
   // The "About me" card at the top of the Home tab, plus optional skill tags.
   about: "Ello, I'm Sebstyn, a content specialist in the making. I love creating content and helping other creators make theirs even better. Got a project in mind? Message me any time.",
   skills: [],
