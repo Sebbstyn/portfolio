@@ -194,9 +194,14 @@ window.PORTFOLIO = {
       { src: "assets/minecraft/textures/wingsuit.png",           name: "Wingsuit",           note: "Item" },
     ],
 
+    // Your Sketchfab username. Every public model on that profile shows up
+    // in the Models tab by itself, newest first, and opens in a 3D viewer.
+    // New uploads appear without touching this file.
+    sketchfab: "ILYSlurpy",
+
     // Tabs listed here just say "Coming soon...". Take a name out once
     // that tab has something in it.
-    comingSoon: ["plugins", "models"],
+    comingSoon: ["plugins"],
   },
 
   /* ---------- YouTube analytics ----------

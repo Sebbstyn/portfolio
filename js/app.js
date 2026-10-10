@@ -148,6 +148,8 @@
       minecraft: {
         mods: arr(m.mods), plugins: arr(m.plugins), models: arr(m.models), textures: arr(m.textures),
         comingSoon: arr(m.comingSoon),
+        // a username, or the profile link it comes from
+        sketchfab: String(m.sketchfab || '').trim().replace(/\/+$/, '').replace(/^.*\//, '').replace(/^@/, ''),
       },
       analytics: {
         comingSoon: !!a.comingSoon,
@@ -166,9 +168,12 @@
     }
   }
 
+  // how many Sketchfab models there are, once that list has arrived
+  let sketchfabCount = 0;
+
   function count(secId, subId) {
     if (secId === 'edits') return D.edits[subId].length;
-    if (secId === 'minecraft') return D.minecraft[subId].length;
+    if (secId === 'minecraft') return D.minecraft[subId].length + (subId === 'models' ? sketchfabCount : 0);
     return 0;
   }
 
@@ -776,31 +781,154 @@
         linkEls.length > 0 && h('div', { class: 'mod-links' }, linkEls)));
   }
 
-  function modelsView() {
-    const items = D.minecraft.models, f = frag(), grid = h('div', { class: 'grid models' });
-    if (items.length) {
-      items.forEach((it, i) => grid.append(h('button', {
-        class: 'cc model', type: 'button', 'aria-label': 'View ' + (it.name || 'model ' + (i + 1)),
-        onclick: () => openViewer(items, i, it.pixel ? 'pixel' : 'image'),
-      }, h('span', { class: 'cc-media' },
-        h('img', { class: it.pixel ? 'px' : null, src: it.src, alt: it.name || '', loading: 'lazy' }),
-        it.sample && sampleChip()),
-      h('span', { class: 'cc-meta' },
-        h('span', { class: 'cc-title', text: it.name || 'Untitled' }),
-        it.note && h('span', { class: 'cc-sub', text: it.note })))));
-      f.append(grid);
-    } else {
-      for (let i = 0; i < 4; i++) {
-        grid.append(h('div', { class: 'cc is-empty model' },
-          h('span', { class: 'cc-media' }, h('span', { class: 'slate slate-cube' },
-            h('span', { class: 'cube', style: { 'animation-delay': -i * 3 + 's' } }, Array.from({ length: 6 }, () => h('i', { class: 'missing' }))))),
-          h('span', { class: 'cc-meta' },
-            h('span', { class: 'cc-title', text: 'Missing model' }),
-            h('span', { class: 'cc-sub', text: 'Nothing loaded in this slot' }))));
-      }
-      f.append(grid, note('No models yet.', 'Put renders in assets/minecraft/models and list them in', 'js/content.js', 'under minecraft.models.'));
+  // The public models on a Sketchfab profile, newest first, kept for half an hour.
+  async function sketchfabModels() {
+    const user = D.minecraft.sketchfab;
+    let data = cacheGet('sketchfab|' + user);
+    if (!data) {
+      const res = await fetch('https://api.sketchfab.com/v3/models?count=24&sort_by=-publishedAt&user=' + encodeURIComponent(user));
+      if (!res.ok) throw new Error('Sketchfab answered ' + res.status);
+      const json = await res.json();
+      data = {
+        t: Date.now(),
+        models: arr(json.results).filter(m => /^[0-9a-f]{32}$/i.test(m.uid)).map(m => {
+          // the smallest thumbnail that still looks sharp on a card
+          const shots = arr(m.thumbnails && m.thumbnails.images).slice().sort((a, b) => a.width - b.width);
+          const shot = shots.find(x => x.width >= 700) || shots[shots.length - 1] || {};
+          return {
+            uid: m.uid, name: m.name, src: /^https:\/\//.test(shot.url || '') ? shot.url : '',
+            faces: m.faceCount, views: m.viewCount, animated: m.animationCount > 0,
+          };
+        }),
+      };
+      cacheSet('sketchfab|' + user, data);
     }
-    return f;
+    // A "|" in a Sketchfab title reads as a letter l in this font ("Dustria|" looked
+    // like "Dustrial"), so it is shown as a dot instead.
+    data.models.forEach(m => { m.name = String(m.name || '').replace(/\s*\|\s*/g, ' · '); });
+    sketchfabCount = data.models.length;
+    // the tab's badge was drawn before this number was known
+    const badge = segEl && segEl.querySelector('[data-sub="models"]');
+    if (badge && SECTIONS[state.sec].id === 'minecraft' && !badge.querySelector('.seg-n')) {
+      const n = count('minecraft', 'models');
+      if (n > 0) badge.append(h('span', { class: 'seg-n', text: n }));
+    }
+    return data.models;
+  }
+
+  const modelFacts = it => [
+    it.note, it.faces != null && fmtFull(it.faces) + ' faces', typeof it.views === 'number' && fmtFull(it.views) + ' views',
+  ].filter(Boolean).join(' · ');
+
+  // Sketchfab's viewer script, fetched only when an animated model needs it
+  let sketchfabApi = null;
+  function loadSketchfabApi() {
+    if (!sketchfabApi) {
+      sketchfabApi = new Promise((resolve, reject) => {
+        if (window.Sketchfab) { resolve(window.Sketchfab); return; }
+        const sc = h('script', { src: 'https://static.sketchfab.com/api/sketchfab-viewer-1.12.1.js' });
+        sc.onload = () => (window.Sketchfab ? resolve(window.Sketchfab) : reject(new Error('Sketchfab viewer script did not load')));
+        sc.onerror = () => reject(new Error('Sketchfab viewer script did not load'));
+        document.head.append(sc);
+      });
+    }
+    return sketchfabApi;
+  }
+
+  // Start a Sketchfab viewer in an iframe with the model's animation already
+  // running on a loop. A model can be saved on Sketchfab with "Static pose" as
+  // its default, so the first real animation is picked explicitly.
+  function playModel(iframe, uid, options) {
+    return loadSketchfabApi().then(Sketchfab => new Promise((resolve, reject) => {
+      new Sketchfab(iframe).init(uid, Object.assign({ autostart: 1, ui_theme: 'dark', dnt: 1, ui_hint: 0 }, options, {
+        success: api => {
+          api.start();
+          api.addEventListener('viewerready', () => {
+            api.getAnimations((err, list) => {
+              if (!err && list && list.length) {
+                api.setCurrentAnimationByUID(list[0][0]);
+                api.setCycleMode('loopOne');
+                api.play();
+              }
+              resolve(api);
+            });
+          });
+        },
+        error: () => reject(new Error('Sketchfab viewer could not start')),
+      }));
+    }));
+  }
+
+  // one card per model: a Sketchfab one opens in 3D, a plain image opens enlarged
+  function modelCard(it, i, items) {
+    const facts = modelFacts(it);
+    const label = 'View ' + (it.name || 'model ' + (i + 1)) + (it.uid ? ' in 3D' : '');
+    const open = () => openViewer(items, i, it.pixel ? 'pixel' : 'model');
+    const media = h('span', { class: 'cc-media' },
+      h('img', { class: it.pixel ? 'px' : null, src: it.src, alt: it.name || '', loading: 'lazy' }),
+      it.uid && h('span', { class: 'cc-3d' }, icon('cube'), it.animated ? '3D · Animated' : '3D'),
+      it.sample && sampleChip());
+    const meta = h('span', { class: 'cc-meta' },
+      h('span', { class: 'cc-title', text: it.name || 'Untitled' }),
+      facts && h('span', { class: 'cc-sub', text: facts }));
+    const cls = 'cc model' + (it.uid ? ' skf' : '');
+    if (!(it.uid && it.animated)) return h('button', { class: cls, type: 'button', 'aria-label': label, onclick: open }, media, meta);
+
+    // An animated model plays right on its card: a live viewer sits over the
+    // still image and fades in once it is running. A see-through button on top
+    // keeps the whole card clickable, since the viewer would swallow the click.
+    const live = h('iframe', { class: 'cc-live', title: '', tabindex: -1, 'aria-hidden': 'true', allow: 'autoplay; xr-spatial-tracking' });
+    media.append(live);
+    const card = h('div', { class: cls + ' live' }, media, meta, h('button', { class: 'cc-open', type: 'button', 'aria-label': label, onclick: open }));
+    const begin = () => playModel(live, it.uid, { ui_controls: 0, ui_animations: 0, ui_infos: 0, ui_stop: 0, ui_watermark: 0, scrollwheel: 0, preload: 1 })
+      .then(() => card.classList.add('is-live'), () => { /* the still image stays */ });
+    // wait until the card is on screen before starting a 3D viewer
+    if ('IntersectionObserver' in window) {
+      const seen = new IntersectionObserver(entries => {
+        if (entries.some(e => e.isIntersecting)) { seen.disconnect(); begin(); }
+      });
+      seen.observe(card);
+    } else {
+      begin();
+    }
+    return card;
+  }
+
+  // a slot with the spinning missing-texture cube, for "nothing here" and "loading"
+  function cubeSlot(i, title, sub) {
+    return h('div', { class: 'cc is-empty model' },
+      h('span', { class: 'cc-media' }, h('span', { class: 'slate slate-cube' },
+        h('span', { class: 'cube', style: { 'animation-delay': -i * 3 + 's' } }, Array.from({ length: 6 }, () => h('i', { class: 'missing' }))))),
+      h('span', { class: 'cc-meta' },
+        h('span', { class: 'cc-title', text: title }),
+        h('span', { class: 'cc-sub', text: sub })));
+  }
+
+  function modelsView() {
+    const own = D.minecraft.models, wrap = h('div');
+    const grid = h('div', { class: 'grid models' });
+    wrap.append(grid);
+
+    const draw = (items, extra) => {
+      grid.replaceChildren(...items.map((it, i) => modelCard(it, i, items)));
+      wrap.replaceChildren(grid, ...[].concat(extra || []));
+      reveal(wrap);
+    };
+
+    if (D.minecraft.sketchfab) {
+      // show what is listed in content.js straight away, then add the Sketchfab ones
+      grid.append(...own.map((it, i) => modelCard(it, i, own)), ...[0, 1, 2].map(i => cubeSlot(i, 'Loading model', 'Fetching from Sketchfab')));
+      sketchfabModels().then(
+        list => { if (wrap.isConnected) draw(own.concat(list), !own.length && !list.length && note('No models yet.', 'Nothing is public on the Sketchfab profile', D.minecraft.sketchfab, 'yet.')); },
+        () => { if (wrap.isConnected) draw(own, h('p', { class: 'note' }, h('b', { text: 'Sketchfab is not answering right now.' }), 'The models are at',
+          h('a', { href: 'https://sketchfab.com/' + encodeURIComponent(D.minecraft.sketchfab), target: '_blank', rel: 'noopener', text: 'sketchfab.com/' + D.minecraft.sketchfab }))); });
+    } else if (own.length) {
+      grid.append(...own.map((it, i) => modelCard(it, i, own)));
+    } else {
+      for (let i = 0; i < 4; i++) grid.append(cubeSlot(i, 'Missing model', 'Nothing loaded in this slot'));
+      wrap.append(note('No models yet.', 'Put renders in assets/minecraft/models and list them in', 'js/content.js', 'under minecraft.models.'));
+    }
+    return wrap;
   }
 
   // a number that counts up to its value when it first appears
@@ -1211,7 +1339,22 @@
       cap);
 
     function media(it) {
-      if (kind === 'image') return h('img', { class: 'mv-img', src: it.src, alt: it.title || it.name || '' });
+      if (kind === 'model' && it.uid) {
+        // Sketchfab's own viewer, so the model can be turned and zoomed
+        const box = h('div', { class: 'mv-frame long loading' });
+        const plain = 'https://sketchfab.com/models/' + it.uid + '/embed?autostart=1&ui_theme=dark&dnt=1';
+        const view = h('iframe', {
+          title: (it.name || 'Model') + ' in 3D', allowfullscreen: true,
+          allow: 'autoplay; fullscreen; xr-spatial-tracking',
+        });
+        view.addEventListener('load', () => box.classList.remove('loading'));
+        box.append(view);
+        // an animated model starts playing by itself; if that can't be set up, the plain viewer opens
+        if (it.animated) playModel(view, it.uid, {}).catch(() => { view.src = plain; });
+        else view.src = plain;
+        return box;
+      }
+      if (kind === 'image' || kind === 'model') return h('img', { class: 'mv-img', src: it.src, alt: it.title || it.name || '' });
       if (kind === 'pixel') return h('div', { class: 'mv-px' }, slotItem(it));
       const frame = h('div', { class: 'mv-frame ' + kind });
       const clip = clipOf(it);
@@ -1248,7 +1391,8 @@
       counter.textContent = (at + 1) + ' / ' + items.length;
       const clip = (kind === 'long' || kind === 'short') && clipOf(it);
       const clipNote = clip && (clip.start ? 'Clip ' + clock(clip.start) + ' to ' + clock(clip.end) : 'First ' + Math.round(clip.end) + ' seconds');
-      cap.textContent = [clipNote, it.client, it.role, it.stat, it.note, it.views && it.views + ' views'].filter(Boolean).join(' · ');
+      cap.textContent = kind === 'model' ? modelFacts(it)
+        : [clipNote, it.client, it.role, it.stat, it.note, it.views && it.views + ' views'].filter(Boolean).join(' · ');
     }
 
     function close() {
@@ -1388,6 +1532,8 @@
     renderFoot();
     window.addEventListener('hashchange', route);
     route();
+    // fetched up front so the Models tab can show its count before it is opened
+    if (D.minecraft.sketchfab && !D.minecraft.comingSoon.includes('models')) sketchfabModels().catch(() => {});
   }
 
   if (DEMO) {
